@@ -1,0 +1,182 @@
+---
+title: "Data modelling"
+output: html_document
+date: "2024-08-24"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+library(plm)
+library("tidyverse")
+```
+
+```{r, include=FALSE}
+data <- read_csv("~/Desktop/2-硕士/MY498/Data/full_data.csv")
+data$`ISO code` <- as.factor(data$`ISO code`)
+data$Country <- as.factor(data$Country)
+data$Year.f <- as.factor(data$Year)
+data <- select(data, -c(`...1`, `Real GDP`, `Employment`, `Trade (% of GDP)`,`FDI Inward (% of GDP)`))
+```
+
+
+```{r}
+# Summary statistics of the key variables:
+summary(data[,c("Average annual hours","Labour productivity")])
+```
+
+```{r}
+# Take the logarithm of labour productivity and average working hours
+data$`Labour productivity` <- log(data$`Labour productivity`)
+data$`Average annual hours` <- log(data$`Average annual hours`)
+data$`Capital deepening` <- log(data$`Capital deepening`)
+data$Patent_Stock <- log(data$Patent_Stock)
+#data$`Private credit to GDP` <- log(data$`Private credit to GDP`)
+#data$`Share of agriculture` <- log(data$`Share of agriculture`)
+#data$Inflation <- log(data$Inflation)
+#data$`Government size` <- log(data$`Government size`)
+#data$Openness <- log(data$Openness)
+```
+
+```{r}
+length(which(is.nan(data$`Labour productivity`)))
+length(which(is.nan(data$Patent_Stock)))
+```
+
+```{r}
+# Tackle the missing values brought by taking logs
+data <- data %>%
+  filter(!is.nan(data$`Labour productivity`))
+data$Patent_Stock[is.nan(data$Patent_Stock)] <- 0
+```
+
+
+```{r}
+colnames(data)
+n_distinct(data$`ISO code`)
+```
+
+```{r}
+# Pooled Regression
+lm.1 <- lm(`Labour productivity` ~ `Average annual hours` + `Capital deepening` + `Patent_Stock` + `FinDev` + `Share of agriculture` + `Inflation` + `Government size` + `Openness`, data=data)
+summary(lm.1)
+```
+
+```{r}
+# Year fixed-effects model
+lm.2.yfe <- lm(`Labour productivity` ~ `Average annual hours` + `Capital deepening` + `Patent_Stock`  + `FinDev` + `Share of agriculture` + `Inflation` + `Government size` + `Openness` + Year.f , data=data)
+summary(lm.2.yfe)
+```
+
+```{r}
+# Country fixed-effects model
+lm.2.cfe <- lm(`Labour productivity` ~ `Average annual hours` + `Capital deepening` + `Patent_Stock` + `FinDev` + `Share of agriculture` + `Inflation` + `Government size` + `Openness` + Country, data=data)
+summary(lm.2.cfe)
+```
+
+```{r}
+# "Two-way" model with fixed effects for both country and year
+lm.2.ycfe <- lm(`Labour productivity` ~ `Average annual hours` + `Capital deepening` + `Patent_Stock` + `FinDev` + `Share of agriculture` + `Inflation` + `Government size` + `Openness` + Year.f + Country, data=data)
+summary(lm.2.ycfe)
+```
+
+```{r}
+# Generate the regression table in latex by kableExtra
+library(kableExtra)
+library(broom)
+
+# Tidy the models
+tidy_lm.1 <- tidy(lm.1) %>% mutate(model = "Pooled Regression")
+tidy_lm.2.cfe <- tidy(lm.2.cfe) %>% mutate(model = "Country Fixed-effects Model")
+tidy_lm.2.yfe <- tidy(lm.2.yfe) %>% mutate(model = "Year Fixed-effects Model")
+
+# Combine all models into a single data frame
+tidy_all <- bind_rows(tidy_lm.1, tidy_lm.2.yfe, tidy_lm.2.cfe)
+
+# Pivot the table to have models as columns
+tidy_wide <- tidy_all %>%
+  select(term, estimate, std.error, model) %>%
+  pivot_wider(names_from = model, values_from = c(estimate, std.error))
+```
+
+```{r}
+# Create the LaTeX table with kableExtra
+latex_table <- kable(tidy_wide, format = "latex", booktabs = TRUE, longtable = TRUE, 
+                     col.names = c("Term", "Estimate (Model 1)", "Std. Error (Model 1)",
+                                   "Estimate (Model 2)", "Std. Error (Model 2)",
+                                   "Estimate (Model 3)", "Std. Error (Model 3)")) %>%
+  kable_styling(latex_options = c("repeat_header"))
+
+# Wrap the table in \resizebox to scale it to text width
+scaled_latex_table <- paste0("\\resizebox{\\textwidth}{!}{", latex_table, "}")
+
+# Save the final LaTeX table to a .tex file
+cat(scaled_latex_table, file = "regression_table.tex")
+```
+
+
+```{r}
+# Generate the stargazer regression table
+stargazer(lm.1, lm.2.yfe, lm.2.cfe,
+          type = "latex",
+          title = "Regression Results",
+          align = TRUE,
+          font.size = "small",
+          no.space = TRUE,
+          column.sep.width = "3pt",
+          single.row = TRUE,
+          header = FALSE,
+          model.numbers = FALSE,
+          table.placement = "!htbp",
+          float.env = "table*",
+          out = "regression_table_stargazer.tex")
+```
+
+```{r}
+# Generate an image for the regression table
+library(stargazer)
+library(webshot2)  # for saving as image
+library(htmltools)
+
+custom_names <- c("Average annual working hours", "Capital deepening", "Patent stock", "FinDev", "Share of agriculture", "Inflation", "Government size", "Openness")
+
+# Generate the stargazer table with custom variable names
+html_table <- stargazer(lm.1, lm.2.yfe, lm.2.cfe,
+          type = "html",
+          title = "Regression Results",
+          align = TRUE,
+          font.size = "small",
+          no.space = TRUE,
+          column.sep.width = "3pt",
+          single.row = TRUE,
+          header = FALSE,
+          model.numbers = FALSE,
+          covariate.labels = custom_names,
+          dep.var.labels = "Labour Productivity")
+
+# Wrap the HTML table in a full HTML document
+html_doc <- paste0(
+  "<!DOCTYPE html>
+  <html>
+  <head>
+    <style>
+      body { font-family: Arial, sans-serif; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid black; padding: 8px; text-align: left; }
+    </style>
+  </head>
+  <body>",
+  html_table,
+  "</body>
+  </html>"
+)
+
+# Save the HTML to a file
+writeLines(html_doc, "regression_table.html")
+
+# Use webshot2 to save the HTML as an image
+webshot2::webshot("regression_table.html", "regression_table.png", vwidth = 1000, vheight = 800)
+```
+
